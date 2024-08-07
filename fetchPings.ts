@@ -1,18 +1,21 @@
 import axios from 'axios';
-import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+import {
+  logMessage,
+  logError,
+  logPing,
+  logNoPing,
+  saveLogs,
+  saveInvalidJson
+} from './logger';
 
 dotenv.config();
 
 const TOKEN = process.env.INTERCOM_TOKEN;
 const ADMIN_DETAILS = JSON.parse(process.env.ADMIN_DETAILS || '[]');
 const INTERCOM_VERSION = '2.11';
-const OUTPUT_FILE = 'ping_notes.json';
-const ERROR_FILE = 'error_log.json';
 const POLL_INTERVAL = 6000; // 6 seconds for testing
 
-let pingNotesList: any[] = [];
-let errorLog: any[] = [];
 let processedConversations: Set<string> = new Set();
 
 async function fetchConversations(adminId: string) {
@@ -29,8 +32,7 @@ async function fetchConversations(adminId: string) {
     );
     return response.data;
   } catch (error) {
-    console.error('Error fetching conversations:', error);
-    errorLog.push({ type: 'fetchConversations', adminId, error: error.message });
+    logError('fetchConversations', { adminId, error: error.message });
     return null;
   }
 }
@@ -49,14 +51,13 @@ async function fetchConversationParts(conversationId: string) {
     );
     return response.data;
   } catch (error) {
-    console.error(`Error fetching parts for conversation ID ${conversationId}:`, error);
-    errorLog.push({ type: 'fetchConversationParts', conversationId, error: error.message });
+    logError('fetchConversationParts', { conversationId, error: error.message });
     return null;
   }
 }
 
 async function processConversations(initial: boolean = false) {
-  console.log(`Processing conversations... (initial: ${initial})`);
+  logMessage(`Processing conversations... (initial: ${initial})`);
   for (const admin of ADMIN_DETAILS) {
     const adminId = admin.id;
     const adminName = admin.name;
@@ -81,55 +82,44 @@ async function processConversations(initial: boolean = false) {
             pingNotes.forEach((note: any) => {
               const authorName = note.author.name;
               const noteTime = new Date(note.created_at * 1000).toUTCString();
-              console.log(`'${authorName}' pinged conversation '${conversationId}' at '${noteTime}'`);
-              pingNotesList.push({ authorName, conversationId, noteTime });
+              logPing(authorName, conversationId, noteTime);
             });
           } else {
-            console.log(`No #ping note found for conversation ID: ${conversationId}`);
+            logNoPing(conversationId);
           }
 
           processedConversations.add(conversationId);
         } else {
-          console.error(`Invalid JSON for conversation parts: ${conversationId}`);
+          logError(`Invalid JSON for conversation parts: ${conversationId}`, parts);
           if (parts) {
-            fs.writeFileSync(`error_conversation_parts_${conversationId}.json`, JSON.stringify(parts, null, 2));
-            errorLog.push({ type: 'invalidParts', conversationId, parts });
+            saveInvalidJson(`conversation_parts_${conversationId}`, parts);
           }
         }
       }
     } else {
-      console.error('Invalid JSON for conversations');
+      logError('Invalid JSON for conversations', conversations);
       if (conversations) {
-        fs.writeFileSync('error_conversations.json', JSON.stringify(conversations, null, 2));
-        errorLog.push({ type: 'invalidConversations', conversations });
+        saveInvalidJson('conversations', conversations);
       }
     }
   }
 
-  if (pingNotesList.length > 0) {
-    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(pingNotesList, null, 2));
-  }
-
-  if (errorLog.length > 0) {
-    fs.writeFileSync(ERROR_FILE, JSON.stringify(errorLog, null, 2));
-  }
+  saveLogs();
 }
 
 function startMonitoring() {
-  console.log('Starting monitoring...');
+  logMessage('Starting monitoring...');
   processConversations(true).then(() => {
     setInterval(() => {
-      console.log('Polling for new conversations...');
+      logMessage('Polling for new conversations...');
       processConversations().catch((error) => {
-        console.error('Error processing conversations:', error);
-        errorLog.push({ type: 'processConversations', error: error.message });
-        fs.writeFileSync(ERROR_FILE, JSON.stringify(errorLog, null, 2));
+        logError('processConversations', { error: error.message });
+        saveLogs();
       });
     }, POLL_INTERVAL);
   }).catch((error) => {
-    console.error('Error processing conversations:', error);
-    errorLog.push({ type: 'processConversations', error: error.message });
-    fs.writeFileSync(ERROR_FILE, JSON.stringify(errorLog, null, 2));
+    logError('processConversations', { error: error.message });
+    saveLogs();
   });
 }
 

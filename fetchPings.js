@@ -37,17 +37,13 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 var axios_1 = require("axios");
-var fs = require("fs");
 var dotenv = require("dotenv");
+var logger_1 = require("./logger");
 dotenv.config();
 var TOKEN = process.env.INTERCOM_TOKEN;
 var ADMIN_DETAILS = JSON.parse(process.env.ADMIN_DETAILS || '[]');
 var INTERCOM_VERSION = '2.11';
-var OUTPUT_FILE = 'ping_notes.json';
-var ERROR_FILE = 'error_log.json';
 var POLL_INTERVAL = 6000; // 6 seconds for testing
-var pingNotesList = [];
-var errorLog = [];
 var processedConversations = new Set();
 function fetchConversations(adminId) {
     return __awaiter(this, void 0, void 0, function () {
@@ -68,8 +64,7 @@ function fetchConversations(adminId) {
                     return [2 /*return*/, response.data];
                 case 2:
                     error_1 = _a.sent();
-                    console.error('Error fetching conversations:', error_1);
-                    errorLog.push({ type: 'fetchConversations', adminId: adminId, error: error_1.message });
+                    (0, logger_1.logError)('fetchConversations', { adminId: adminId, error: error_1.message });
                     return [2 /*return*/, null];
                 case 3: return [2 /*return*/];
             }
@@ -95,8 +90,7 @@ function fetchConversationParts(conversationId) {
                     return [2 /*return*/, response.data];
                 case 2:
                     error_2 = _a.sent();
-                    console.error("Error fetching parts for conversation ID ".concat(conversationId, ":"), error_2);
-                    errorLog.push({ type: 'fetchConversationParts', conversationId: conversationId, error: error_2.message });
+                    (0, logger_1.logError)('fetchConversationParts', { conversationId: conversationId, error: error_2.message });
                     return [2 /*return*/, null];
                 case 3: return [2 /*return*/];
             }
@@ -110,7 +104,7 @@ function processConversations() {
         return __generator(this, function (_c) {
             switch (_c.label) {
                 case 0:
-                    console.log("Processing conversations... (initial: ".concat(initial, ")"));
+                    (0, logger_1.logMessage)("Processing conversations... (initial: ".concat(initial, ")"));
                     _i = 0, ADMIN_DETAILS_1 = ADMIN_DETAILS;
                     _c.label = 1;
                 case 1:
@@ -140,20 +134,18 @@ function processConversations() {
                                             pingNotes.forEach(function (note) {
                                                 var authorName = note.author.name;
                                                 var noteTime = new Date(note.created_at * 1000).toUTCString();
-                                                console.log("'".concat(authorName, "' pinged conversation '").concat(conversationId, "' at '").concat(noteTime, "'"));
-                                                pingNotesList.push({ authorName: authorName, conversationId: conversationId, noteTime: noteTime });
+                                                (0, logger_1.logPing)(authorName, conversationId, noteTime);
                                             });
                                         }
                                         else {
-                                            console.log("No #ping note found for conversation ID: ".concat(conversationId));
+                                            (0, logger_1.logNoPing)(conversationId);
                                         }
                                         processedConversations.add(conversationId);
                                     }
                                     else {
-                                        console.error("Invalid JSON for conversation parts: ".concat(conversationId));
+                                        (0, logger_1.logError)("Invalid JSON for conversation parts: ".concat(conversationId), parts);
                                         if (parts) {
-                                            fs.writeFileSync("error_conversation_parts_".concat(conversationId, ".json"), JSON.stringify(parts, null, 2));
-                                            errorLog.push({ type: 'invalidParts', conversationId: conversationId, parts: parts });
+                                            (0, logger_1.saveInvalidJson)("conversation_parts_".concat(conversationId), parts);
                                         }
                                     }
                                     return [2 /*return*/];
@@ -174,42 +166,34 @@ function processConversations() {
                     return [3 /*break*/, 3];
                 case 6: return [3 /*break*/, 8];
                 case 7:
-                    console.error('Invalid JSON for conversations');
+                    (0, logger_1.logError)('Invalid JSON for conversations', conversations);
                     if (conversations) {
-                        fs.writeFileSync('error_conversations.json', JSON.stringify(conversations, null, 2));
-                        errorLog.push({ type: 'invalidConversations', conversations: conversations });
+                        (0, logger_1.saveInvalidJson)('conversations', conversations);
                     }
                     _c.label = 8;
                 case 8:
                     _i++;
                     return [3 /*break*/, 1];
                 case 9:
-                    if (pingNotesList.length > 0) {
-                        fs.writeFileSync(OUTPUT_FILE, JSON.stringify(pingNotesList, null, 2));
-                    }
-                    if (errorLog.length > 0) {
-                        fs.writeFileSync(ERROR_FILE, JSON.stringify(errorLog, null, 2));
-                    }
+                    (0, logger_1.saveLogs)();
                     return [2 /*return*/];
             }
         });
     });
 }
 function startMonitoring() {
-    console.log('Starting monitoring...');
+    (0, logger_1.logMessage)('Starting monitoring...');
     processConversations(true).then(function () {
         setInterval(function () {
-            console.log('Polling for new conversations...');
+            (0, logger_1.logMessage)('Polling for new conversations...');
             processConversations().catch(function (error) {
-                console.error('Error processing conversations:', error);
-                errorLog.push({ type: 'processConversations', error: error.message });
-                fs.writeFileSync(ERROR_FILE, JSON.stringify(errorLog, null, 2));
+                (0, logger_1.logError)('processConversations', { error: error.message });
+                (0, logger_1.saveLogs)();
             });
         }, POLL_INTERVAL);
     }).catch(function (error) {
-        console.error('Error processing conversations:', error);
-        errorLog.push({ type: 'processConversations', error: error.message });
-        fs.writeFileSync(ERROR_FILE, JSON.stringify(errorLog, null, 2));
+        (0, logger_1.logError)('processConversations', { error: error.message });
+        (0, logger_1.saveLogs)();
     });
 }
 startMonitoring();
